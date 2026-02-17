@@ -1,6 +1,6 @@
 """
-AI Chess Arena - Multi-Agent Chess Game
-Two AI agents play chess using AutoGen
+AI Chess Arena - Multi-Agent Chess with Groq
+Two AI agents play chess using Groq AI (Free & Fast!)
 
 Author: Kanav Chauhan
 """
@@ -8,7 +8,8 @@ Author: Kanav Chauhan
 import chess
 import chess.svg
 import streamlit as st
-from autogen import ConversableAgent, register_function
+from groq import Groq
+import random
 
 # Page config
 st.set_page_config(
@@ -17,7 +18,7 @@ st.set_page_config(
     page_icon="♟️"
 )
 
-# Custom CSS  
+# Custom CSS
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap');
@@ -48,21 +49,36 @@ st.markdown("""
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         color: white;
         font-weight: 600;
+        padding: 0.75rem;
         border-radius: 12px;
+        transition: all 0.3s;
+    }
+    
+    .stButton>button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
     }
 </style>
 """, unsafe_allow_html=True)
 
 # Session state
-for key, default in [
-    ("openai_api_key", None),
-    ("board", chess.Board()),
-    ("made_move", False),
-    ("move_history", []),
-    ("max_turns", 5)
-]:
-    if key not in st.session_state:
-        st.session_state[key] = default
+if "board" not in st.session_state:
+    st.session_state.board = chess.Board()
+if "move_history" not in st.session_state:
+    st.session_state.move_history = []
+if "game_log" not in st.session_state:
+    st.session_state.game_log = []
+if "max_moves" not in st.session_state:
+    st.session_state.max_moves = 10
+if "game_over" not in st.session_state:
+    st.session_state.game_over = False
+
+# Initialize Groq
+try:
+    client = Groq(api_key=st.secrets["GROQ_API_KEY"])
+except:
+    st.error("⚠️ GROQ_API_KEY not found! Add it in Streamlit Secrets.")
+    st.stop()
 
 # Header
 st.markdown('<h1 class="main-header">♟️ AI Chess Arena</h1>', unsafe_allow_html=True)
@@ -70,9 +86,10 @@ st.markdown('<p style="text-align:center;color:#666;font-size:1.2rem;">Watch Two
 
 st.markdown("""
 <div style='text-align:center;margin-bottom:2rem;'>
-    <span class='agent-badge'>🤖 AutoGen</span>
-    <span class='agent-badge'>🧠 GPT-4o-mini</span>
-    <span class='agent-badge'>♟️ Python Chess</span>
+    <span class='agent-badge'>🤖 Multi-Agent AI</span>
+    <span class='agent-badge'>⚡ Groq Llama 3.3</span>
+    <span class='agent-badge'>♟️ Full Chess Rules</span>
+    <span class='agent-badge'>🆓 100% Free!</span>
 </div>
 """, unsafe_allow_html=True)
 
@@ -80,210 +97,255 @@ st.markdown("---")
 
 # Sidebar
 with st.sidebar:
-    st.markdown("### ⚙️ Configuration")
+    st.markdown("### ⚙️ Game Settings")
     
-    api_key = st.text_input("OpenAI API Key:", type="password")
-    if api_key:
-        st.session_state.openai_api_key = api_key
-        st.success("✅ API key saved!")
-    
-    st.markdown("---")
-    st.markdown("### 🎮 Settings")
-    
-    max_turns = st.slider("Number of Moves:", 1, 50, 5)
-    st.session_state.max_turns = max_turns
+    max_moves = st.slider("Number of Moves:", 5, 30, 10)
+    st.session_state.max_moves = max_moves
     
     st.info(f"""
-**Current:** {max_turns} moves
+**Selected:** {max_moves} moves
 
-💡 **Recommended:**
-- Quick: 5-10 moves
-- Short: 20-30 moves  
-- Full: 100+ moves
+💡 **Recommendations:**
+- Quick demo: 5-10 moves
+- Medium game: 15-20 moves
+- Long game: 25-30 moves
 
-⚠️ More moves = higher API costs
+✅ **Completely FREE!**
+No API key needed!
 """)
     
     st.markdown("---")
-    st.markdown("### 🤖 The Agents")
+    st.markdown("### 🤖 The AI Agents")
     st.markdown("""
 **Agent White** ⚪
-- White pieces
-- Opening strategy
-- GPT-4o-mini
+- Controls white pieces
+- Aggressive strategy
+- Powered by Groq Llama 3.3
 
 **Agent Black** ⚫
-- Black pieces
-- Counter-attack
-- GPT-4o-mini
+- Controls black pieces
+- Defensive tactics
+- Powered by Groq Llama 3.3
 
-**Game Master** 🎯
-- Validates moves
-- Manages turns
+Both agents analyze positions and make strategic decisions in real-time!
 """)
+    
+    st.markdown("---")
+    st.markdown("### 📊 Stats")
+    st.metric("Moves Played", len(st.session_state.move_history))
+    st.metric("Max Moves", st.session_state.max_moves)
 
-# Chess functions
-def available_moves() -> str:
-    moves = [str(m) for m in st.session_state.board.legal_moves]
-    return "Available moves: " + ",".join(moves)
+# AI Agent function
+def get_ai_move(board: chess.Board, player: str) -> str:
+    """Get chess move from AI agent using Groq"""
+    
+    legal_moves = [str(move) for move in board.legal_moves]
+    
+    if player == "white":
+        personality = "You play WHITE pieces. Be aggressive, control center, attack when possible."
+    else:
+        personality = "You play BLACK pieces. Be solid defensively, look for counter-attacks."
+    
+    prompt = f"""{personality}
 
-def execute_move(move: str) -> str:
+Board position (FEN): {board.fen()}
+
+Legal moves: {', '.join(legal_moves[:20])}
+
+Analyze and choose the BEST move. Consider:
+- Piece safety
+- Center control  
+- King safety
+- Tactics
+
+Respond with ONLY the move in UCI format (like 'e2e4'). Nothing else."""
+
     try:
-        chess_move = chess.Move.from_uci(move)
-        if chess_move not in st.session_state.board.legal_moves:
-            return f"Invalid move: {move}"
-        
-        st.session_state.board.push(chess_move)
-        st.session_state.made_move = True
-        
-        board_svg = chess.svg.board(
-            st.session_state.board,
-            arrows=[(chess_move.from_square, chess_move.to_square)],
-            size=400
-        )
-        st.session_state.move_history.append(board_svg)
-        
-        piece = st.session_state.board.piece_at(chess_move.to_square)
-        from_sq = chess.SQUARE_NAMES[chess_move.from_square]
-        to_sq = chess.SQUARE_NAMES[chess_move.to_square]
-        
-        desc = f"Moved {chess.piece_name(piece.piece_type)} from {from_sq} to {to_sq}."
-        
-        if st.session_state.board.is_checkmate():
-            winner = 'White' if st.session_state.board.turn == chess.BLACK else 'Black'
-            desc += f"\n🏆 Checkmate! {winner} wins!"
-        elif st.session_state.board.is_check():
-            desc += "\n⚠️ Check!"
-        
-        return desc
-    except:
-        return f"Invalid move: {move}"
-
-def check_made_move(msg):
-    if st.session_state.made_move:
-        st.session_state.made_move = False
-        return True
-    return False
-
-# Main
-if st.session_state.openai_api_key:
-    try:
-        config = [{"model": "gpt-4o-mini", "api_key": st.session_state.openai_api_key}]
-        
-        agent_white = ConversableAgent(
-            name="Agent_White",
-            system_message="You are a chess player with white pieces. Call available_moves() then execute_move().",
-            llm_config={"config_list": config, "cache_seed": None}
+        response = client.chat.completions.create(
+            messages=[
+                {"role": "system", "content": "You are a chess grandmaster. Respond only with a move in UCI format."},
+                {"role": "user", "content": prompt}
+            ],
+            model="llama-3.3-70b-versatile",
+            temperature=0.8,
+            max_tokens=30
         )
         
-        agent_black = ConversableAgent(
-            name="Agent_Black",
-            system_message="You are a chess player with black pieces. Call available_moves() then execute_move().",
-            llm_config={"config_list": config, "cache_seed": None}
-        )
+        move_text = response.choices[0].message.content.strip().lower()
         
-        game_master = ConversableAgent(
-            name="Game_Master",
-            llm_config=False,
-            is_termination_msg=check_made_move,
-            default_auto_reply="Make a move.",
-            human_input_mode="NEVER"
-        )
+        # Extract valid move
+        for word in move_text.split():
+            word = word.strip('.,!?"\n')
+            if len(word) >= 4 and len(word) <= 5:
+                try:
+                    test_move = chess.Move.from_uci(word)
+                    if test_move in board.legal_moves:
+                        return word
+                except:
+                    pass
         
-        for agent in [agent_white, agent_black]:
-            register_function(execute_move, caller=agent, executor=game_master, name="execute_move", description="Make a move")
-            register_function(available_moves, caller=agent, executor=game_master, name="available_moves", description="Get legal moves")
-        
-        agent_white.register_nested_chats(
-            trigger=agent_black,
-            chat_queue=[{"sender": game_master, "recipient": agent_white, "summary_method": "last_msg"}]
-        )
-        
-        agent_black.register_nested_chats(
-            trigger=agent_white,
-            chat_queue=[{"sender": game_master, "recipient": agent_black, "summary_method": "last_msg"}]
-        )
-        
-        col1, col2 = st.columns([2, 1])
-        
-        with col1:
-            st.markdown("### 🎮 Chess Board")
-            board_svg = chess.svg.board(st.session_state.board, size=400)
-            st.image(board_svg, use_container_width=True)
-        
-        with col2:
-            st.markdown("### 📊 Game Info")
-            st.metric("Moves", len(st.session_state.move_history))
-            st.metric("Max Moves", st.session_state.max_turns)
-        
-        st.markdown("---")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            if st.button("▶️ Start Game", type="primary", use_container_width=True):
-                st.session_state.board.reset()
-                st.session_state.move_history = []
-                
-                with st.spinner("🤖 AI agents playing..."):
-                    result = agent_black.initiate_chat(
-                        recipient=agent_white,
-                        message="Let's play chess! You go first.",
-                        max_turns=st.session_state.max_turns,
-                        summary_method="reflection_with_llm"
-                    )
-                
-                st.success("✅ Game complete!")
-                st.markdown(f"**Summary:** {result.summary}")
-        
-        with col2:
-            if st.button("🔄 Reset", use_container_width=True):
-                st.session_state.board.reset()
-                st.session_state.move_history = []
-                st.rerun()
-        
-        if st.session_state.move_history:
-            st.markdown("---")
-            st.markdown("### 📜 Move History")
-            
-            cols = st.columns(3)
-            for i, svg in enumerate(st.session_state.move_history):
-                agent = "White ⚪" if i % 2 == 0 else "Black ⚫"
-                with cols[i % 3]:
-                    st.markdown(f"**Move {i+1}** by {agent}")
-                    st.image(svg)
+        # Fallback: random legal move
+        return random.choice(legal_moves)
     
     except Exception as e:
-        st.error(f"❌ Error: {e}")
+        # Fallback on error
+        return random.choice(legal_moves)
 
-else:
-    st.info("""
-### 🚀 Getting Started
+# Main interface
+col1, col2 = st.columns([2, 1])
 
-AI Chess Arena - Two AI agents play chess!
+with col1:
+    st.markdown("### 🎮 Chess Board")
+    
+    # Display board
+    board_svg = chess.svg.board(st.session_state.board, size=450)
+    st.image(board_svg, use_container_width=True)
 
-**How it works:**
-1. Two AI agents (White & Black) powered by GPT-4o-mini
-2. They analyze and make strategic moves
-3. Game Master validates moves
+with col2:
+    st.markdown("### 📊 Game Status")
+    
+    if st.session_state.board.is_checkmate():
+        winner = 'White' if st.session_state.board.turn == chess.BLACK else 'Black'
+        st.success(f"🏆 {winner} wins by checkmate!")
+        st.session_state.game_over = True
+    elif st.session_state.board.is_stalemate():
+        st.info("🤝 Draw by stalemate")
+        st.session_state.game_over = True
+    elif st.session_state.board.is_insufficient_material():
+        st.info("⚖️ Draw - insufficient material")
+        st.session_state.game_over = True
+    elif st.session_state.board.is_check():
+        st.warning("⚠️ King is in check!")
+    else:
+        turn = "White" if st.session_state.board.turn == chess.WHITE else "Black"
+        st.info(f"Turn: {turn}")
+    
+    st.markdown("---")
+    
+    st.markdown("**Game Progress**")
+    progress = min(len(st.session_state.move_history) / st.session_state.max_moves, 1.0)
+    st.progress(progress)
+    st.caption(f"{len(st.session_state.move_history)} / {st.session_state.max_moves} moves")
 
-**To start:**
-1. Get OpenAI API key from platform.openai.com
-2. Enter it in sidebar
-3. Click "Start Game"
+st.markdown("---")
 
-**Features:**
-- ♟️ Full chess rules
-- 🤖 Multi-agent AutoGen
-- 🎯 Move validation
-- 📊 Real-time tracking
-""")
-    st.warning("⚠️ Enter API key in sidebar!")
+# Game controls
+col1, col2 = st.columns(2)
+
+with col1:
+    if st.button("▶️ Start New Game", type="primary", use_container_width=True):
+        # Reset game
+        st.session_state.board = chess.Board()
+        st.session_state.move_history = []
+        st.session_state.game_log = []
+        st.session_state.game_over = False
+        
+        # Play game
+        with st.spinner("🤖 AI agents are playing chess..."):
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            move_count = 0
+            
+            while move_count < st.session_state.max_moves and not st.session_state.game_over:
+                # Determine whose turn
+                player = "white" if st.session_state.board.turn == chess.WHITE else "black"
+                agent_name = "Agent White ⚪" if player == "white" else "Agent Black ⚫"
+                
+                status_text.text(f"Move {move_count + 1}: {agent_name} is thinking...")
+                
+                # Get AI move
+                move_uci = get_ai_move(st.session_state.board, player)
+                
+                # Execute move
+                try:
+                    move = chess.Move.from_uci(move_uci)
+                    piece = st.session_state.board.piece_at(move.from_square)
+                    from_sq = chess.square_name(move.from_square)
+                    to_sq = chess.square_name(move.to_square)
+                    
+                    st.session_state.board.push(move)
+                    
+                    # Save board state
+                    board_svg = chess.svg.board(
+                        st.session_state.board,
+                        arrows=[(move.from_square, move.to_square)],
+                        size=400
+                    )
+                    st.session_state.move_history.append(board_svg)
+                    
+                    # Log move
+                    piece_name = chess.piece_name(piece.piece_type).capitalize()
+                    log_entry = f"{agent_name}: {piece_name} {from_sq} → {to_sq}"
+                    st.session_state.game_log.append(log_entry)
+                    
+                    # Check game end
+                    if st.session_state.board.is_checkmate():
+                        winner = 'White' if st.session_state.board.turn == chess.BLACK else 'Black'
+                        st.session_state.game_log.append(f"🏆 Checkmate! {winner} wins!")
+                        st.session_state.game_over = True
+                    elif st.session_state.board.is_stalemate():
+                        st.session_state.game_log.append("🤝 Stalemate - Draw!")
+                        st.session_state.game_over = True
+                    elif st.session_state.board.is_insufficient_material():
+                        st.session_state.game_log.append("⚖️ Draw - Insufficient material")
+                        st.session_state.game_over = True
+                    elif st.session_state.board.is_check():
+                        st.session_state.game_log.append("⚠️ Check!")
+                    
+                    move_count += 1
+                    progress_bar.progress(min(move_count / st.session_state.max_moves, 1.0))
+                
+                except Exception as e:
+                    st.error(f"Error with move: {e}")
+                    break
+            
+            status_text.empty()
+            progress_bar.empty()
+        
+        st.success("✅ Game complete! Scroll down to see all moves.")
+        st.rerun()
+
+with col2:
+    if st.button("🔄 Reset Board", use_container_width=True):
+        st.session_state.board = chess.Board()
+        st.session_state.move_history = []
+        st.session_state.game_log = []
+        st.session_state.game_over = False
+        st.rerun()
+
+# Game log
+if st.session_state.game_log:
+    st.markdown("---")
+    st.markdown("### 📜 Game Log")
+    
+    for i, log in enumerate(st.session_state.game_log):
+        st.text(f"{i+1}. {log}")
+
+# Move history visualization
+if st.session_state.move_history:
+    st.markdown("---")
+    st.markdown("### 🎥 Move History")
+    
+    cols = st.columns(3)
+    for i, board_svg in enumerate(st.session_state.move_history):
+        agent = "White ⚪" if i % 2 == 0 else "Black ⚫"
+        
+        with cols[i % 3]:
+            st.markdown(f"**Move {i+1}** by {agent}")
+            st.image(board_svg)
 
 # Footer
 st.markdown("---")
-col1, col2, col3 = st.columns([1,1,1])
+
+col1, col2, col3 = st.columns([1, 1, 1])
 with col2:
-    st.link_button("🔗 LinkedIn", "https://linkedin.com/in/kanavchauhan23", use_container_width=True, type="primary")
+    st.link_button(
+        "🔗 Connect on LinkedIn",
+        "https://linkedin.com/in/kanavchauhan23",
+        use_container_width=True,
+        type="primary"
+    )
 
 st.markdown("<h4 style='text-align:center;'>Built with ❤️ by Kanav Chauhan</h4>", unsafe_allow_html=True)
+st.markdown("<p style='text-align:center;color:gray;'>AI Chess Arena - Powered by Groq Llama 3.3</p>", unsafe_allow_html=True)
