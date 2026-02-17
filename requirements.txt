@@ -1,5 +1,5 @@
 streamlit
-chess==1.11.1
-autogen==0.6.1
+python-chess==1.999
+pyautogen==0.2.32
 cairosvg
 pillow
